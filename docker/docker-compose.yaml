@@ -1,0 +1,181 @@
+version: "3"
+services:
+  graphql:
+    image: namhoangle/graphql_srv:forgetPw
+    ports:
+      - 4001:4001
+    restart: always
+    networks:
+      - back-tier
+    container_name: graphql_service
+    environment:
+      MICRO_REGISTRY: etcd
+      MICRO_REGISTRY_ADDRESS: etcd:4001
+      VERNEMQKEY: 0Jq77NCv0qU2ukgLiaepLkDKs2XEmf9E
+    volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+    links:
+      - redis
+      - authapi
+    depends_on:
+      - redis
+  etcd:
+    container_name: etcd
+    image: bitnami/etcd:latest
+    networks:
+      - back-tier
+    ports:
+      - 2345:23745
+      - 23801:2380
+    environment:
+      - ALLOW_NONE_AUTHENTICATION=yes
+      - ETCD_ADVERTISE_CLIENT_URLS=http://etcd:2379
+      - ETCD_LISTEN_CLIENT_URLS=http://0.0.0.0:4001,http://0.0.0.0:5001,http://0.0.0.0:5000,http://0.0.0.0:9096,http://0.0.0.0:6000
+  mqtt_srv:
+    container_name: mqtt-server
+    image: namhoangle/mqtt_srv:cert
+    ports:
+      - 5001:5001
+    networks:
+      - back-tier
+    restart: always
+    links:
+      - mqtt
+    depends_on:
+      - mqtt
+    volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+    environment:
+      MICRO_REGISTRY: etcd
+      MICRO_REGISTRY_ADDRESS: etcd:5001
+      DOMAIN: "cloud.dicomiot.com"
+      PASSWORD: "mqttserver2020"
+  mqtt:
+    container_name: vernemq-broker
+    image: erlio/docker-vernemq
+    restart: on-failure
+    depends_on:
+      - redis
+    ports:
+      - 8883:8883
+      - 9999:9999
+    networks:
+      - back-tier
+    volumes:
+      - $PWD/vernemq/ca.crt:/etc/vernemq/vernemq_ca.crt:z
+      - $PWD/vernemq/server.crt:/etc/vernemq/vernemq.crt:z
+      - $PWD/vernemq/server.key:/etc/vernemq/vernemq.key:z
+    links:
+      - redis
+    environment:
+      - DOCKER_VERNEMQ_ACCEPT_EULA=yes
+      - DOCKER_VERNEMQ_LISTENER__SSL__DEFAULT= 0.0.0.0:8883
+      - DOCKER_VERNEMQ_LISTENER__SSL__CAFILE= /etc/vernemq/vernemq_ca.crt
+      - DOCKER_VERNEMQ_LISTENER__SSL__CERTFILE= /etc/vernemq/vernemq.crt
+      - DOCKER_VERNEMQ_LISTENER__SSL__KEYFILE= /etc/vernemq/vernemq.key
+      - DOCKER_VERNEMQ_VMQ_DIVERSITY__AUTH_REDIS__ENABLED=on
+      - DOCKER_VERNEMQ_VMQ_DIVERSITY__REDIS__HOST= redis
+      - DOCKER_VERNEMQ_VMQ_DIVERSITY__REDIS__PORT= 6379
+      - DOCKER_VERNEMQ_VMQ_DIVERSITY__REDIS__DATABASE= 0
+      - DOCKER_VERNEMQ_PLUGINS__VMQ_DIVERSITY= on
+      - DOCKER_VERNEMQ_VMQ_DIVERSITY__REDIS__PASSWORD= bbf5099c19728139a0c0bc77de98e241ddbe13a6f923b3557a6a035e45f05d1c27ec728af982b629b682d47fc043db5b48e2573880f3da3be527782ab7246181
+      - DOCKER_VERNEMQ_PLUGINS__VMQ_PASSWD=off
+      - DOCKER_VERNEMQ_PLUGINS__VMQ_ACL=off
+      - DOCKER_VERNEMQ_ALLOW_MULTIPLE_SESSIONS= on
+      - DOCKER_VERNEMQ_LOG__CONSOLE= both
+      - DOCKER_VERNEMQ_LOG__CONSOLE__LEVEL= debug
+      - DOCKER_VERNEMQ_LISTENER__HTTP__DEFAULT= 0.0.0.0:9999
+  resourcedb:
+    container_name: resourcedb
+    image: postgres:11
+    volumes:
+      - ./data.sql:/docker-entrypoint-initdb.d/datanew.sql:z
+      - ./dbdata:/var/lib/postgresql/data:z
+    environment:
+      POSTGRES_DB: resourcedb
+      POSTGRES_USER: resourcedb
+      POSTGRES_PASSWORD: resourcedb
+    expose:
+      - 5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U resourcedb"]
+      timeout: 45s
+      interval: 10s
+      retries: 10
+    restart: always
+    command: postgres -c max_locks_per_transaction=2000
+    networks:
+      - back-tier
+  iot:
+    image: namhoangle/iot_api:latest
+    environment:
+      MICRO_REGISTRY: etcd
+      POSTGRES_USER: resourcedb
+      POSTGRES_DB: resourcedb
+      POSTGRES_HOST: resourcedb
+      POSTGRES_PASSWORD: resourcedb
+      MICRO_REGISTRY_ADDRESS: etcd:5000
+    restart: always
+    links:
+      - resourcedb
+    volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+    networks:
+      - back-tier
+    expose:
+      - "5000"
+      #ports :
+      #- "5000:5000"
+  notify:
+    image: namhoangle/notification_service:debug
+    environment:
+      MICRO_REGISTRY: etcd
+      MICRO_REGISTRY_ADDRESS: etcd:6000
+    links:
+      - resourcedb
+    restart: always
+    volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+    expose:
+      - "6000"
+    networks:
+      - back-tier
+  authapi:
+    image: namhoangle/auth_api:test
+    container_name: auth_api
+    ports:
+      - 9096:9096
+    environment:
+      MICRO_REGISTRY: etcd
+      MICRO_REGISTRY_ADDRESS: etcd:9096
+      gmail: dicomiotservice@gmail.com
+      passmail: uuijiwcohupaskza
+    restart: always
+    volumes:
+      - "/etc/timezone:/etc/timezone:ro"
+      - "/etc/localtime:/etc/localtime:ro"
+    links:
+      - resourcedb
+    networks:
+      - back-tier
+  redis:
+    image: redis:alpine
+    command: >
+      sh -c "redis-server --appendonly yes --requirepass bbf5099c19728139a0c0bc77de98e241ddbe13a6f923b3557a6a035e45f05d1c27ec728af982b629b682d47fc043db5b48e2573880f3da3be527782ab7246181"
+    ports:
+      - 6379:6379
+    restart: always
+    networks:
+      - back-tier
+    volumes:
+      - ./redis-data:/data:z
+networks:
+  back-tier:
+    driver: bridge
+volumes:
+  dbdata:
+  redis-data:

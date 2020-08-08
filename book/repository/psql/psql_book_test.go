@@ -28,7 +28,7 @@ func TestFetch(t *testing.T) {
 			ID: 2, Title: "title 2", Author: "author 2",
 		},
 		domain.Book{
-			ID: 2, Title: "title 2", Author: "author 2",
+			ID: 3, Title: "title 2", Author: "author 2",
 		},
 	}
 
@@ -43,6 +43,7 @@ func TestFetch(t *testing.T) {
 	a := psqlBookRepository{gormMock}
 	list, err := a.Fetch(context.TODO())
 	assert.NoError(t, err)
-	assert.Contains(t, "1", strconv.FormatUint(uint64(mockArticles[0].ID), 10))
+	//assert.Contains(t, "2", strconv.FormatUint(uint64(mockArticles[0].ID), 10),"testing compare")
+	assert.Equal(t, "1", strconv.FormatUint(uint64(mockArticles[0].ID), 10))
 	assert.Len(t, list, 3)
 }
